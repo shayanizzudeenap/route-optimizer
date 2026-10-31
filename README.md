@@ -2,10 +2,19 @@
 
 Real-time route optimization for distributed logistics. Vehicles and delivery stops are streamed in, and routes are re-optimized continuously by background workers.
 
+## Background
+This project grew out of SustainEats, my K-DISC Young Innovators Programme
+idea: a platform connecting restaurants, cafes and grocery stores that have
+surplus food with people and organizations in need, with deliveries
+coordinated by the app. SustainEats is at concept/prototype stage. This repo
+is a standalone engine for its hardest backend problem: dispatching and
+re-optimizing deliveries in real time.
+
 ## Features
 - FastAPI service with Pydantic-validated request and response models
 - In-memory state engine with O(1) lookups and a memoized haversine distance matrix
 - Capacity-checked, lock-guarded stop assignment
+- Cheapest-insertion dispatch plus 2-opt route improvement
 - Asyncio background worker that drains a pending-stop queue
 
 ## Tech Stack
@@ -13,20 +22,33 @@ Python 3.14 · FastAPI · Pydantic v2 · asyncio · pytest
 
 ## Project Structure
     app/
-      schemas.py   # Pydantic models
-      state.py     # in-memory state engine
+      schemas.py     # Pydantic models
+      state.py       # in-memory state engine
+      optimizer.py   # cheapest insertion + 2-opt
+      worker.py      # asyncio dispatch worker
+      main.py        # FastAPI endpoints
     tests/
 
 ## Run Locally
     python -m venv .venv && source .venv/bin/activate
     pip install -r requirements.txt
     pytest -q
+    uvicorn app.main:app --reload
+
+Then open `/docs` for the interactive API.
+
+## API
+- `POST /vehicles`, `GET /vehicles`, `PUT /vehicles/{id}/location`
+- `POST /stops` (returns 202; assignment happens in the background), `GET /stops/{id}`
+- `GET /routes`, `GET /health`
 
 ## Roadmap
 - [x] Data models and state engine
-- [ ] Route optimizer (nearest-neighbor insertion + 2-opt)
-- [ ] Background re-optimization worker
-- [ ] REST API endpoints
+- [x] Cheapest-insertion + 2-opt optimizer, asyncio dispatch worker
+- [x] REST API
+- [ ] Pickup→dropoff pairing (donor before recipient, same vehicle)
+- [ ] Expiry deadlines and urgency-weighted dispatch
+- [ ] Load balancing across vehicles
 - [ ] Benchmarks
 - [ ] Redis-backed state for horizontal scaling
 
