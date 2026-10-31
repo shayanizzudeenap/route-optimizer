@@ -58,19 +58,25 @@ class LogisticsState:
         await self.pending.put(s.id)  # wake the background worker
         return s
 
-    async def assign(self, stop_id: str, vehicle_id: str) -> bool:
-        """Atomic capacity-checked assignment."""
+    async def assign(self, stop_id: str, vehicle_id: str, index: int | None = None) -> bool:
         async with self.lock:
-            s, v = self.stops.get(stop_id), self.vehicles.get(vehicle_id)
-            if not s or not v or s.status is not StopStatus.PENDING:
-                return False
-            if v.load + s.demand > v.capacity or v.status is VehicleStatus.OFFLINE:
-                return False
-            v.load += s.demand
+            return self.assign_locked(stop_id, vehicle_id, index)
+
+    def assign_locked(self, stop_id: str, vehicle_id: str, index: int | None = None) -> bool:
+        """Capacity-checked assignment. Caller must hold self.lock."""
+        s, v = self.stops.get(stop_id), self.vehicles.get(vehicle_id)
+        if not s or not v or s.status is not StopStatus.PENDING:
+            return False
+        if v.load + s.demand > v.capacity or v.status is VehicleStatus.OFFLINE:
+            return False
+        v.load += s.demand
+        if index is None:
             v.route.append(s.id)
-            v.status = VehicleStatus.EN_ROUTE
-            s.status, s.vehicle_id = StopStatus.ASSIGNED, v.id
-            return True
+        else:
+            v.route.insert(index, s.id)
+        v.status = VehicleStatus.EN_ROUTE
+        s.status, s.vehicle_id = StopStatus.ASSIGNED, v.id
+        return True
 
 
 state = LogisticsState()  # module-level singleton
