@@ -15,7 +15,10 @@ re-optimizing deliveries in real time.
 - In-memory state engine with O(1) lookups and a memoized haversine distance matrix
 - Capacity-checked, lock-guarded stop assignment
 - Cheapest-insertion dispatch plus 2-opt route improvement
-- Asyncio background worker that drains a pending-stop queue
+- Pickup→dropoff deliveries: donor visited before recipient, on the same vehicle
+- Capacity tracked as a load profile along the route (load rises at pickup, falls at dropoff)
+- Expiry deadlines checked against an ETA estimate (assumed 30 km/h, no loading time); expired deliveries are marked `failed`
+- Asyncio background worker that drains a pending queue
 
 ## Tech Stack
 Python 3.14 · FastAPI · Pydantic v2 · asyncio · pytest
@@ -40,14 +43,16 @@ Then open `/docs` for the interactive API.
 ## API
 - `POST /vehicles`, `GET /vehicles`, `PUT /vehicles/{id}/location`
 - `POST /stops` (returns 202; assignment happens in the background), `GET /stops/{id}`
+- `POST /deliveries` (donor pickup + recipient dropoff, optional `expires_at`; returns 202), `GET /deliveries/{id}`
 - `GET /routes`, `GET /health`
 
 ## Roadmap
 - [x] Data models and state engine
 - [x] Cheapest-insertion + 2-opt optimizer, asyncio dispatch worker
 - [x] REST API
-- [ ] Pickup→dropoff pairing (donor before recipient, same vehicle)
-- [ ] Expiry deadlines and urgency-weighted dispatch
+- [x] Pickup→dropoff pairing (donor before recipient, same vehicle)
+- [x] Expiry deadlines (ETA-based feasibility)
+- [ ] Urgency-weighted dispatch (`priority` is stored but not yet used in the cost)
 - [ ] Load balancing across vehicles
 - [ ] Benchmarks
 - [ ] Redis-backed state for horizontal scaling

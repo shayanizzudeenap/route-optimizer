@@ -4,8 +4,8 @@ import asyncio
 from math import asin, cos, radians, sin, sqrt
 
 from app.schemas import (
-    Coordinate, Stop, StopCreate, StopStatus,
-    Vehicle, VehicleCreate, VehicleStatus, _now,
+    Coordinate, Delivery, DeliveryCreate, Stop, StopCreate, StopKind,
+    StopStatus, Vehicle, VehicleCreate, VehicleStatus, _now,
 )
 
 
@@ -21,8 +21,9 @@ class LogisticsState:
     def __init__(self) -> None:
         self.vehicles: dict[str, Vehicle] = {}
         self.stops: dict[str, Stop] = {}
+        self.deliveries: dict[str, Delivery] = {}
         self._dist: dict[tuple[Coordinate, Coordinate], float] = {}  # memoized matrix
-        self.pending: asyncio.Queue[str] = asyncio.Queue()  # stop IDs for the worker
+        self.pending: asyncio.Queue[str] = asyncio.Queue()  # stop or delivery IDs
         self.lock = asyncio.Lock()  # guards multi-step mutations
 
     # ----- distance matrix (lazy, memoized, symmetric) -----
@@ -50,7 +51,7 @@ class LogisticsState:
             v.updated_at = _now()
             return v
 
-    # ----- stops -----
+    # ----- standalone stops -----
     async def add_stop(self, data: StopCreate) -> Stop:
         s = Stop(**data.model_dump())
         async with self.lock:
@@ -77,6 +78,36 @@ class LogisticsState:
         v.status = VehicleStatus.EN_ROUTE
         s.status, s.vehicle_id = StopStatus.ASSIGNED, v.id
         return True
+
+    # ----- deliveries (donor pickup -> recipient dropoff) -----
+    async def add_delivery(self, data: DeliveryCreate) -> Delivery:
+        pu = Stop(location=data.pickup, demand=data.demand,
+                  priority=data.priority, kind=StopKind.PICKUP)
+        do = Stop(location=data.dropoff, demand=data.demand, priority=data.priority,
+                  deadline=data.expires_at, kind=StopKind.DROPOFF)
+        d = Delivery(pickup_stop_id=pu.id, dropoff_stop_id=do.id,
+                     demand=data.demand, expires_at=data.expires_at)
+        pu.delivery_id = do.delivery_id = d.id
+        async with self.lock:
+            self.stops[pu.id], self.stops[do.id] = pu, do
+            self.deliveries[d.id] = d
+        await self.pending.put(d.id)
+        return d
+
+    def assign_pair_locked(self, d: Delivery, vehicle_id: str, route: list[str]) -> None:
+        """Commit a pre-validated route. Caller must hold self.lock."""
+        v = self.vehicles[vehicle_id]
+        v.route = route
+        v.status = VehicleStatus.EN_ROUTE
+        for sid in (d.pickup_stop_id, d.dropoff_stop_id):
+            s = self.stops[sid]
+            s.status, s.vehicle_id = StopStatus.ASSIGNED, vehicle_id
+        d.status, d.vehicle_id = StopStatus.ASSIGNED, vehicle_id
+
+    def fail_delivery_locked(self, d: Delivery) -> None:
+        d.status = StopStatus.FAILED
+        for sid in (d.pickup_stop_id, d.dropoff_stop_id):
+            self.stops[sid].status = StopStatus.FAILED
 
 
 state = LogisticsState()  # module-level singleton

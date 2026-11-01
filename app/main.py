@@ -7,7 +7,8 @@ from fastapi import FastAPI, HTTPException
 
 from app.optimizer import path_length
 from app.schemas import (
-    LocationUpdate, RouteView, Stop, StopCreate, Vehicle, VehicleCreate,
+    Delivery, DeliveryCreate, LocationUpdate, RouteView, Stop, StopCreate,
+    Vehicle, VehicleCreate,
 )
 from app.state import state
 from app.worker import run_worker
@@ -72,6 +73,19 @@ async def get_stop(stop_id: str) -> Stop:
     if s is None:
         raise HTTPException(404, "stop not found")
     return s
+
+
+@app.post("/deliveries", response_model=Delivery, status_code=202)
+async def create_delivery(body: DeliveryCreate) -> Delivery:
+    return await state.add_delivery(body)
+
+
+@app.get("/deliveries/{delivery_id}", response_model=Delivery)
+async def get_delivery(delivery_id: str) -> Delivery:
+    d = state.deliveries.get(delivery_id)
+    if d is None:
+        raise HTTPException(404, "delivery not found")
+    return d
 
 
 @app.get("/routes", response_model=list[RouteView])

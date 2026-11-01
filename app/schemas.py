@@ -28,6 +28,12 @@ class StopStatus(str, Enum):
     FAILED = "failed"
 
 
+class StopKind(str, Enum):
+    STANDALONE = "standalone"
+    PICKUP = "pickup"    # donor: load goes up
+    DROPOFF = "dropoff"  # recipient: load goes down
+
+
 class Coordinate(BaseModel):
     model_config = ConfigDict(frozen=True)  # hashable -> usable as dict key
     lat: float = Field(ge=-90, le=90)
@@ -47,6 +53,14 @@ class StopCreate(BaseModel):
     deadline: datetime | None = None
 
 
+class DeliveryCreate(BaseModel):
+    pickup: Coordinate   # donor
+    dropoff: Coordinate  # recipient
+    demand: int = Field(gt=0)
+    priority: int = Field(default=3, ge=1, le=5)
+    expires_at: datetime | None = None  # food must be delivered by then
+
+
 class LocationUpdate(BaseModel):
     location: Coordinate
 
@@ -56,7 +70,7 @@ class Vehicle(BaseModel):
     id: str = Field(default_factory=_uid)
     location: Coordinate
     capacity: int
-    load: int = 0
+    load: int = 0  # permanent load from standalone stops only
     status: VehicleStatus = VehicleStatus.IDLE
     route: list[str] = Field(default_factory=list)  # ordered stop IDs
     updated_at: datetime = Field(default_factory=_now)
@@ -68,6 +82,19 @@ class Stop(BaseModel):
     demand: int
     priority: int = 3
     deadline: datetime | None = None
+    kind: StopKind = StopKind.STANDALONE
+    delivery_id: str | None = None
+    status: StopStatus = StopStatus.PENDING
+    vehicle_id: str | None = None
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Delivery(BaseModel):
+    id: str = Field(default_factory=_uid)
+    pickup_stop_id: str
+    dropoff_stop_id: str
+    demand: int
+    expires_at: datetime | None = None
     status: StopStatus = StopStatus.PENDING
     vehicle_id: str | None = None
     created_at: datetime = Field(default_factory=_now)
