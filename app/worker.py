@@ -14,6 +14,13 @@ log = logging.getLogger("worker")
 RETRY_SECONDS = 2.0
 
 
+def balance_penalty(st: LogisticsState, route_len: int, priority: int) -> float:
+    """Extra cost (km-equivalent) for piling more stops onto a long route.
+    Priority 3 -> factor 1; priority 5 -> 0.6 (urgent: take the nearest vehicle);
+    priority 1 -> 3 (low urgency: happy to balance)."""
+    return st.balance_km_per_stop * route_len * (3.0 / priority)
+
+
 def _dispatch_delivery_locked(st: LogisticsState, delivery_id: str, now: datetime) -> bool:
     d = st.deliveries.get(delivery_id)
     if d is None or d.status is not StopStatus.PENDING:
@@ -28,8 +35,11 @@ def _dispatch_delivery_locked(st: LogisticsState, delivery_id: str, now: datetim
         if v.status is VehicleStatus.OFFLINE:
             continue
         res = best_pair_insertion(st, v, pu, do, now)
-        if res and (best is None or res[1] < best[0]):
-            best = (res[1], v, res[0])
+        if res is None:
+            continue
+        cost = res[1] + balance_penalty(st, len(v.route), pu.priority)
+        if best is None or cost < best[0]:
+            best = (cost, v, res[0])
     if best is None:
         return False  # nothing feasible right now; worker retries
 
@@ -59,8 +69,9 @@ async def dispatch_one(st: LogisticsState, item_id: str) -> bool:
             cand = v.route[:idx] + [stop.id] + v.route[idx:]
             if not route_feasible(st, v, cand, now):
                 continue
-            if best is None or delta < best[0]:
-                best = (delta, v, idx)
+            cost = delta + balance_penalty(st, len(v.route), stop.priority)
+            if best is None or cost < best[0]:
+                best = (cost, v, idx)
         if best is None:
             return False
 

@@ -25,6 +25,9 @@ class LogisticsState:
         self._dist: dict[tuple[Coordinate, Coordinate], float] = {}  # memoized matrix
         self.pending: asyncio.Queue[str] = asyncio.Queue()  # stop or delivery IDs
         self.lock = asyncio.Lock()  # guards multi-step mutations
+        # Load balancing: dispatch cost = extra_km + balance_km_per_stop * len(route) * k,
+        # where k = 3 / priority (urgent items care less about balance). 0 disables balancing.
+        self.balance_km_per_stop: float = 2.0
 
     # ----- distance matrix (lazy, memoized, symmetric) -----
     def distance(self, a: Coordinate, b: Coordinate) -> float:
