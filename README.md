@@ -28,7 +28,7 @@ Python 3.14 · FastAPI · Pydantic v2 · asyncio · pytest
     app/
       schemas.py     # Pydantic models
       state.py       # in-memory state engine
-      optimizer.py   # cheapest insertion + 2-opt
+      optimizer.py   # insertion (single and pair), feasibility, 2-opt
       worker.py      # asyncio dispatch worker
       main.py        # FastAPI endpoints
     benchmarks/
@@ -52,10 +52,11 @@ Then open `/docs` for the interactive API.
 ## Benchmarks
 Seeded random workload in a Kerala-sized box: vehicles of capacity 20, deliveries
 of demand 1-5, priority 1-5, no expiry. Dispatch only (no HTTP), one delivery at a time
-through the same code path as the worker. Single process, CPython, run on a cloud
+through the same code path as the worker. Single process, CPython, run on a 2-core cloud
 sandbox, one run per configuration, so treat timings as indicative and expect
 different numbers on your machine. Reproduce with
-`python -m benchmarks.bench --vehicles 50 --deliveries 300 --seed 42`.
+`python -m benchmarks.bench --vehicles 50 --deliveries 300 --seed 42`
+(add `--balanced-only` for 1,000+ deliveries; the unbalanced run gets slow).
 
 **50 vehicles, 300 deliveries (seed 42)**
 
@@ -66,22 +67,58 @@ different numbers on your machine. Reproduce with
 | Most stops on one vehicle | 164 | 28 |
 | Idle vehicles | 39 | 10 |
 | Total distance | 11,774 km | 11,503 km |
-| Mean / p95 dispatch time | 912 ms / 2,525 ms | 44.6 ms / 104 ms |
+| Mean / p95 dispatch time | 27 ms / 103 ms | 1.1 ms / 2.7 ms |
 
 **20 vehicles, 100 deliveries, two more seeds**
 
-| Seed | Longest/mean (off → on) | Total distance (off → on) | Mean dispatch (off → on) |
+| Seed | Longest/mean (off → on) | Total distance (off → on) |
+|---|---|---|
+| 1 | 8.4x → 2.0x | 4,138 → 4,539 km (+9.7%) |
+| 2 | 8.4x → 2.5x | 3,722 → 3,909 km (+5.0%) |
+
+**50 vehicles, 1,000 deliveries, balancing on (seed 42):** longest route 884 km
+(1.35x the mean), at most 50 stops on one vehicle, no idle vehicles, 32,773 km total.
+
+### Dispatch speed
+Pair insertion was the bottleneck, so I profiled it and rewrote it. Same machine, same
+session, same seeds. The routes produced are identical before and after (same total km,
+longest route and stops per vehicle in every row).
+
+| Workload | Before | After | Speedup |
 |---|---|---|---|
-| 1 | 8.4x → 2.0x | 4,138 → 4,539 km (+9.7%) | 117 → 10.6 ms |
-| 2 | 8.4x → 2.5x | 3,722 → 3,909 km (+5.0%) | 98 → 12.8 ms |
+| 20 vehicles, 100 deliveries, no balancing | 11.5 s (mean 115 ms) | 0.32 s (3.2 ms) | 36x |
+| 50 vehicles, 300 deliveries, no balancing | 263 s (mean 875 ms) | 8.0 s (27 ms) | 33x |
+| 50 vehicles, 300 deliveries, balancing | 14.8 s (mean 49 ms) | 0.34 s (1.1 ms) | 44x |
+| 50 vehicles, 1,000 deliveries, balancing | 379 s (mean 379 ms, p95 1,143 ms) | 7.4 s (mean 7.4 ms, p95 24.5 ms) | 51x |
+
+Larger run, new code only (the old code would take far too long): 100 vehicles, 3,000
+deliveries, balancing on: 112 s total, mean 37 ms, p95 143 ms, **worst single dispatch 1.9 s**.
+
+What changed:
+1. The extra distance of each candidate slot pair is computed in O(1) from precomputed
+   distances, instead of re-measuring the whole candidate route (about 90% of the old runtime).
+2. The distance cache is keyed by plain float tuples. Hashing a frozen Pydantic model ran
+   Python code on every lookup and was about 45% of the old profile (this overlaps with item 1,
+   because most lookups came from re-measuring routes).
+3. Feasibility (capacity, pickup-before-dropoff, deadlines) is checked lazily in ascending
+   cost order and stops at the first feasible slot pair. Vehicles are visited by ascending
+   balance penalty and skipped once the penalty alone exceeds the best cost found, which
+   is an exact cut-off because extra distance is never negative.
+
+`tests/test_fast_insertion.py` keeps the original brute-force implementation as an oracle
+and checks the new one against it on random states with capacities and deadlines.
 
 Takeaways and limits:
 - Pure cheapest insertion piles most work on a few vehicles. Balancing fixes the skew,
-  and costs 5-10% extra total distance in two of the three runs (it was 2% lower in the third).
-- Dispatch is much faster with balancing, because pair insertion is roughly O(n³) in
-  route length per vehicle (n² slot pairs, each with an O(n) feasibility check), and balancing keeps routes short.
-- Still open: 10 of 50 vehicles stay idle at 300 deliveries (the 2 km/stop weight is hand-picked, not tuned),
-  and 1,000+ deliveries was not benchmarked because long routes get slow.
+  and costs 5-10% extra total distance in two of the three small runs (it was 2% lower in the third).
+- Balancing still keeps dispatch cheaper because routes stay short (0.34 s vs 8.0 s for the
+  300-delivery run).
+- Ranking slot pairs is now O(n²) arithmetic per vehicle (it was O(n³)). Each feasibility check
+  is O(n), and usually only a few run, but under tight capacity or deadlines many candidates can
+  be infeasible and the worst case is still O(n³).
+- Dispatch is synchronous CPU work on the event loop, so the 1.9 s worst case above would
+  stall every API request for that long. Moving it off the loop is the next step.
+- 10 of 50 vehicles stay idle at 300 deliveries (the 2 km/stop weight is hand-picked, not tuned).
 - `priority` only scales the balance penalty; it does not reorder the queue.
   Its behavior is unit-tested but its effect is not benchmarked.
 
@@ -94,7 +131,8 @@ Takeaways and limits:
 - [x] Load balancing across vehicles
 - [x] Priority-scaled dispatch cost
 - [x] Benchmarks
-- [ ] Faster pair insertion (avoid O(n³) per vehicle) and 1,000+ delivery benchmark
+- [x] Faster pair insertion and 1,000+ delivery benchmark (up to 51x faster, identical routes)
+- [ ] Move dispatch off the event loop to cut worst-case latency
 - [ ] Tune the balance weight; priority-ordered queue
 - [ ] Redis-backed state for horizontal scaling
 

@@ -30,16 +30,22 @@ def _dispatch_delivery_locked(st: LogisticsState, delivery_id: str, now: datetim
         return True
 
     pu, do = st.stops[d.pickup_stop_id], st.stops[d.dropoff_stop_id]
-    best = None  # (extra_km, vehicle, route)
-    for v in st.vehicles.values():
-        if v.status is VehicleStatus.OFFLINE:
-            continue
-        res = best_pair_insertion(st, v, pu, do, now)
-        if res is None:
-            continue
-        cost = res[1] + balance_penalty(st, len(v.route), pu.priority)
-        if best is None or cost < best[0]:
-            best = (cost, v, res[0])
+    # Visit vehicles by ascending balance penalty. Extra km is never negative, so a
+    # vehicle whose penalty alone already reaches the best cost found cannot win,
+    # and neither can any later (higher-penalty) vehicle: stop there.
+    ranked = sorted(
+        (balance_penalty(st, len(v.route), pu.priority), k, v)
+        for k, v in enumerate(st.vehicles.values())
+        if v.status is not VehicleStatus.OFFLINE
+    )
+    best = None  # (cost, vehicle, route)
+    for penalty, _, v in ranked:
+        if best is not None and penalty >= best[0]:
+            break
+        bound = float("inf") if best is None else best[0] - penalty
+        res = best_pair_insertion(st, v, pu, do, now, max_cost=bound)
+        if res is not None:
+            best = (res[1] + penalty, v, res[0])
     if best is None:
         return False  # nothing feasible right now; worker retries
 

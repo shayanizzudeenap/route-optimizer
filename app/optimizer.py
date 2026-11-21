@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Callable
 
@@ -65,22 +66,59 @@ def cheapest_insertion(st: LogisticsState, v: Vehicle, stop: Stop) -> tuple[int,
 
 
 def best_pair_insertion(
-    st: LogisticsState, v: Vehicle, pickup: Stop, dropoff: Stop, now: datetime
+    st: LogisticsState,
+    v: Vehicle,
+    pickup: Stop,
+    dropoff: Stop,
+    now: datetime,
+    max_cost: float = float("inf"),
 ) -> tuple[list[str], float] | None:
-    """Try every (pickup slot, dropoff slot) with dropoff after pickup.
-    Returns (new_route, extra_km) for the cheapest feasible one, else None."""
+    """Cheapest feasible (pickup slot, dropoff slot) with dropoff after pickup.
+    Returns (new_route, extra_km), or None if no feasible slot costs < max_cost.
+
+    The extra distance of every slot pair is computed in O(1) from per-slot
+    insertion costs, so ranking all O(n^2) pairs costs O(n^2) arithmetic. The
+    O(n) feasibility check then runs lazily in ascending cost order and stops at
+    the first feasible pair (ties resolve to the lowest (i, j), as before)."""
     base = v.route
-    base_len = path_length(st, v.location, base)
-    best: tuple[list[str], float] | None = None
-    for i in range(len(base) + 1):
-        for j in range(i, len(base) + 1):
-            cand = base[:i] + [pickup.id] + base[i:j] + [dropoff.id] + base[j:]
-            cost = path_length(st, v.location, cand) - base_len
-            if best is not None and cost >= best[1]:
-                continue
-            if route_feasible(st, v, cand, now):
-                best = (cand, cost)
-    return best
+    n = len(base)
+    dist = st.distance
+    pts = [v.location] + [st.stops[sid].location for sid in base]
+    p, d = pickup.location, dropoff.location
+    pd = dist(p, d)
+
+    # Each distance is looked up once: to the pickup, to the dropoff, and along the
+    # existing route's edges.
+    dp = [dist(pt, p) for pt in pts]
+    dd = [dist(pt, d) for pt in pts]
+    edge = [dist(pts[i], pts[i + 1]) for i in range(n)]
+
+    # ins_p[i] / ins_d[i]: extra km of placing that stop alone between pts[i], pts[i+1].
+    # The open path has no edge after the last stop, so appending costs just dp / dd.
+    ins_p = [dp[i] + dp[i + 1] - edge[i] for i in range(n)] + [dp[n]]
+    ins_d = [dd[i] + dd[i + 1] - edge[i] for i in range(n)] + [dd[n]]
+
+    cands: list[tuple[float, int, int]] = []
+    for i in range(n + 1):
+        # pickup and dropoff adjacent in the same slot: pts[i] -> p -> d -> pts[i+1]
+        c = dp[i] + pd + (dd[i + 1] - edge[i] if i < n else 0.0)
+        if c < max_cost:
+            cands.append((c, i, i))
+        ip = ins_p[i]
+        if ip >= max_cost:  # dropoff insertion cost is >= 0 (triangle inequality)
+            continue
+        for j in range(i + 1, n + 1):
+            c = ip + ins_d[j]
+            if c < max_cost:
+                cands.append((c, i, j))
+
+    heapq.heapify(cands)
+    while cands:
+        c, i, j = heapq.heappop(cands)
+        route = base[:i] + [pickup.id] + base[i:j] + [dropoff.id] + base[j:]
+        if route_feasible(st, v, route, now):
+            return route, c
+    return None
 
 
 def two_opt(

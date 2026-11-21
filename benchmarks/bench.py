@@ -95,13 +95,15 @@ async def main() -> None:
     p.add_argument("--deliveries", type=int, default=300)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--balance", type=float, default=2.0, help="km penalty per route stop")
+    p.add_argument("--balanced-only", action="store_true",
+                   help="skip the no-balancing run (it piles routes up and gets slow at 1,000+)")
     a = p.parse_args()
 
     print(f"vehicles={a.vehicles} deliveries={a.deliveries} seed={a.seed} (capacity 20, demand 1-5)\n")
-    rows = [
-        await run_once(a.vehicles, a.deliveries, a.seed, 0.0),
-        await run_once(a.vehicles, a.deliveries, a.seed, a.balance),
-    ]
+    rows = []
+    if not a.balanced_only:
+        rows.append(await run_once(a.vehicles, a.deliveries, a.seed, 0.0))
+    rows.append(await run_once(a.vehicles, a.deliveries, a.seed, a.balance))
     print(fmt_table(rows))
 
 

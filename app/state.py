@@ -22,7 +22,9 @@ class LogisticsState:
         self.vehicles: dict[str, Vehicle] = {}
         self.stops: dict[str, Stop] = {}
         self.deliveries: dict[str, Delivery] = {}
-        self._dist: dict[tuple[Coordinate, Coordinate], float] = {}  # memoized matrix
+        # Memoized matrix. Keyed by plain float tuples: hashing a frozen Pydantic
+        # model runs Python code on every lookup and dominated profiles.
+        self._dist: dict[tuple[float, float, float, float], float] = {}
         self.pending: asyncio.Queue[str] = asyncio.Queue()  # stop or delivery IDs
         self.lock = asyncio.Lock()  # guards multi-step mutations
         # Load balancing: dispatch cost = extra_km + balance_km_per_stop * len(route) * k,
@@ -31,11 +33,12 @@ class LogisticsState:
 
     # ----- distance matrix (lazy, memoized, symmetric) -----
     def distance(self, a: Coordinate, b: Coordinate) -> float:
-        key = (a, b)
+        key = (a.lat, a.lng, b.lat, b.lng)
         d = self._dist.get(key)
         if d is None:
             d = haversine_km(a, b)
-            self._dist[key] = self._dist[(b, a)] = d
+            self._dist[key] = d
+            self._dist[(b.lat, b.lng, a.lat, a.lng)] = d
         return d
 
     # ----- vehicles -----
