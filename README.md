@@ -1,5 +1,7 @@
 # Real-Time Dynamic Route Optimizer
 
+[![tests](https://github.com/shayanizzudeenap/route-optimizer/actions/workflows/tests.yml/badge.svg)](https://github.com/shayanizzudeenap/route-optimizer/actions/workflows/tests.yml)
+
 Real-time route optimization for distributed logistics. Vehicles and delivery stops are streamed in, and routes are re-optimized continuously by background workers.
 
 ## Background
