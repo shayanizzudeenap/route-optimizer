@@ -8,9 +8,10 @@ Real-time route optimization for distributed logistics. Vehicles and delivery st
 This project grew out of SustainEats, my K-DISC Young Innovators Programme
 idea: a platform connecting restaurants, cafes and grocery stores that have
 surplus food with people and organizations in need, with deliveries
-coordinated by the app. SustainEats is at concept/prototype stage. This repo
-is a standalone engine for its hardest backend problem: dispatching and
-re-optimizing deliveries in real time.
+coordinated by the app. SustainEats won the State-Level Winner Award (YIP 6.0)
+at the Kerala K-DISC Young Innovators Programme (2023–2024). It is at
+concept/prototype stage. This repo is a standalone engine for its hardest
+backend problem: dispatching and re-optimizing deliveries in real time.
 
 ## Features
 - FastAPI service with Pydantic-validated request and response models
