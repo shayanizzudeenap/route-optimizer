@@ -23,6 +23,15 @@ re-optimizing deliveries in real time.
 - Load-balanced dispatch: cost = extra km + a per-stop penalty on long routes, scaled by `priority` (urgent items care less about balance)
 - Asyncio background worker that drains a pending queue
 
+## Example output
+![Routes produced by the dispatcher for 10 seeded deliveries across 4 vehicles](docs/demo.png)
+
+The dispatcher's routes for 10 seeded deliveries and 4 vehicles in a city-sized area
+(about 22 km square). Stars are vehicle start positions, circles are donor pickups and
+squares are recipient dropoffs; matching letters pair the two ends of a delivery. Arrows
+show visit order, and every pickup comes before its dropoff. Regenerate with
+`pip install matplotlib && python docs/make_demo.py`.
+
 ## Tech Stack
 Python 3.14 · FastAPI · Pydantic v2 · asyncio · pytest
 
